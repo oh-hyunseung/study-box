@@ -1,0 +1,6 @@
+{
+  "name": "보급 교육 상자",
+  "description": "세계 각지의 배움이 필요한 학생들을 위해 대한민국 교육과정에 맞춘 맞춤형 개념 탐구, 요약, 실시간 최신 정보 및 모의 문제를 제공하는 인공지능 보급 교육 플랫폼입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
