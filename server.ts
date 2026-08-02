@@ -13,12 +13,11 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 
-// Initialize Gemini API client
-const apiKey = process.env.GEMINI_API_KEY;
-
-let ai: GoogleGenAI | null = null;
-if (apiKey) {
-  ai = new GoogleGenAI({
+// Helper to dynamically get Gemini API client
+function getAIClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({
     apiKey: apiKey,
     httpOptions: {
       headers: {
@@ -26,21 +25,22 @@ if (apiKey) {
       }
     }
   });
-} else {
-  console.warn("⚠️ GEMINI_API_KEY is not defined. AI features will be unavailable until configured.");
 }
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
+  const ai = getAIClient();
   res.json({ status: "ok", aiAvailable: !!ai });
 });
 
 // Primary endpoint for the Education Box
 app.post("/api/education/explore", async (req, res) => {
   try {
+    const ai = getAIClient();
     if (!ai) {
       return res.status(500).json({ 
-        error: "Gemini API key is missing. Please configure GEMINI_API_KEY in the Secrets panel." 
+        success: false,
+        error: "Gemini API 키가 설정되지 않았습니다. Vercel 환경 변수(Environment Variables)에서 GEMINI_API_KEY를 설정해 주세요." 
       });
     }
 
@@ -241,8 +241,12 @@ app.post("/api/education/explore", async (req, res) => {
 // Endpoint to review student's self-written summary for active recall
 app.post("/api/education/check-summary", async (req, res) => {
   try {
+    const ai = getAIClient();
     if (!ai) {
-      return res.status(500).json({ error: "Gemini API key is missing." });
+      return res.status(500).json({ 
+        success: false,
+        error: "Gemini API 키가 설정되지 않았습니다. Vercel 환경 변수(Environment Variables)에서 GEMINI_API_KEY를 설정해 주세요." 
+      });
     }
 
     const { subject, unit, studentSummary, teacherExplanation } = req.body;
@@ -382,25 +386,30 @@ ${teacherExplanation ? teacherExplanation.substring(0, 1500) : "해당 주제 �
   }
 });
 
-// Configure Vite or production static server
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+export default app;
+export { app };
+
+// Configure Vite or production static server (skip when running on Vercel)
+if (!process.env.VERCEL) {
+  async function startServer() {
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`[보급 교육 상자] Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[보급 교육 상자] Server running on http://localhost:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-  });
+  startServer();
 }
-
-startServer();

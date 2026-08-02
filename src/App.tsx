@@ -175,7 +175,15 @@ export default function App() {
         })
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type");
+      let data: any;
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error("Non-JSON Response:", text);
+        throw new Error(`서버 응답 오류 (상태 코드: ${response.status}). Vercel 프로젝트 환경 변수(Environment Variables)에 GEMINI_API_KEY가 등록되어 있는지 확인해 주세요.`);
+      }
       
       if (!response.ok || !data.success) {
         throw new Error(data.error || "학습자료 생성 중 오류가 발생했습니다.");
@@ -237,7 +245,16 @@ export default function App() {
         })
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type");
+      let data: any;
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error("Non-JSON Response:", text);
+        throw new Error(`서버 응답 오류 (상태 코드: ${response.status}). Vercel 프로젝트 환경 변수(Environment Variables)에 GEMINI_API_KEY가 등록되어 있는지 확인해 주세요.`);
+      }
+
       if (!response.ok || !data.success) {
         throw new Error(data.error || "요약 점검 중 오류가 발생했습니다.");
       }
