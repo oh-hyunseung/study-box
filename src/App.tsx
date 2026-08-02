@@ -182,7 +182,12 @@ export default function App() {
       } else {
         const text = await response.text();
         console.error("Non-JSON Response:", text);
-        throw new Error(`서버 응답 오류 (상태 코드: ${response.status}). Vercel 프로젝트 환경 변수(Environment Variables)에 GEMINI_API_KEY가 등록되어 있는지 확인해 주세요.`);
+        throw new Error(
+          `서버 응답 오류 (상태 코드: ${response.status}).\n\n` +
+          `[Vercel 환경 변수 해결 방법]\n` +
+          `1. Vercel 프로젝트 Settings > Environment Variables에서 GEMINI_API_KEY가 등록되어 있는지 확인해 주세요.\n` +
+          `2. ★ 필수: 환경 변수 추가 후 Vercel 대시보드의 [Deployments] 탭에서 [Redeploy (재배포)] 버튼을 클릭해야 서버에 적용됩니다!`
+        );
       }
       
       if (!response.ok || !data.success) {
@@ -252,7 +257,12 @@ export default function App() {
       } else {
         const text = await response.text();
         console.error("Non-JSON Response:", text);
-        throw new Error(`서버 응답 오류 (상태 코드: ${response.status}). Vercel 프로젝트 환경 변수(Environment Variables)에 GEMINI_API_KEY가 등록되어 있는지 확인해 주세요.`);
+        throw new Error(
+          `서버 응답 오류 (상태 코드: ${response.status}).\n\n` +
+          `[Vercel 환경 변수 해결 방법]\n` +
+          `1. Vercel 프로젝트 Settings > Environment Variables에서 GEMINI_API_KEY가 등록되어 있는지 확인해 주세요.\n` +
+          `2. ★ 필수: 환경 변수 추가 후 Vercel 대시보드의 [Deployments] 탭에서 [Redeploy (재배포)] 버튼을 클릭해야 서버에 적용됩니다!`
+        );
       }
 
       if (!response.ok || !data.success) {

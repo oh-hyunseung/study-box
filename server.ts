@@ -15,16 +15,26 @@ app.use(express.json());
 
 // Helper to dynamically get Gemini API client
 function getAIClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  return new GoogleGenAI({
-    apiKey: apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+  const apiKey = 
+    process.env.GEMINI_API_KEY || 
+    process.env.VITE_GEMINI_API_KEY || 
+    process.env.GOOGLE_API_KEY || 
+    process.env.API_KEY;
+
+  if (!apiKey || !apiKey.trim()) return null;
+  try {
+    return new GoogleGenAI({
+      apiKey: apiKey.trim(),
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
       }
-    }
-  });
+    });
+  } catch (err) {
+    console.error("Failed to initialize GoogleGenAI client:", err);
+    return null;
+  }
 }
 
 // Health check endpoint
@@ -37,13 +47,6 @@ app.get("/api/health", (req, res) => {
 app.post("/api/education/explore", async (req, res) => {
   try {
     const ai = getAIClient();
-    if (!ai) {
-      return res.status(500).json({ 
-        success: false,
-        error: "Gemini API 키가 설정되지 않았습니다. Vercel 환경 변수(Environment Variables)에서 GEMINI_API_KEY를 설정해 주세요." 
-      });
-    }
-
     const { subject, unit, difficulty, unclearPart } = req.body;
 
     if (!subject || !unit) {
@@ -53,7 +56,17 @@ app.post("/api/education/explore", async (req, res) => {
     const difficultyText = difficulty || "중학교";
     const unclearText = unclearPart ? `특히 궁금한 부분: ${unclearPart}` : "전반적인 개념 이해 및 중요 유형";
 
-    const prompt = `
+    let response;
+    let fallbackUsed = false;
+    let standardAIFallbackUsed = false;
+    let missingApiKeyNotice = false;
+
+    if (!ai) {
+      console.warn("⚠️ GEMINI_API_KEY is missing in environment. Using educational fallback template.");
+      standardAIFallbackUsed = true;
+      missingApiKeyNotice = true;
+    } else {
+      const prompt = `
 [학생 요청 정보]
 - 학교 급수/난이도: ${difficultyText} 수준
 - 과목: ${subject}
@@ -63,7 +76,7 @@ app.post("/api/education/explore", async (req, res) => {
 위 정보를 바탕으로 대한민국 교육과정에 맞춘 맞춤형 개념 탐구 학습 가이드를 정성스럽게 만들어 주세요.
 `;
 
-    const systemInstruction = `
+      const systemInstruction = `
 당신은 대한민국 교육과정(초등학교, 중학교, 고등학교)에 정통하고, 친절하며 사려 깊은 '보급 교육 상자'의 대표 인공지능 교사입니다.
 사교육 없이 홀로 외롭게 공부하는 학생도 아무런 막힘없이 혼자 힘으로 개념을 완전히 깨우칠 수 있도록, 명쾌하고 다정다감한 말투로 핵심을 짚어 주어야 합니다.
 
@@ -124,45 +137,41 @@ app.post("/api/education/explore", async (req, res) => {
 한국어로 아주 친절하고 칭찬과 격려가 담긴 따뜻한 선생님의 목소리로 답변해 주세요.
 `;
 
-    // Try calling Gemini with Search Grounding first
-    let response;
-    let fallbackUsed = false;
-    let standardAIFallbackUsed = false;
-
-    try {
-      response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: systemInstruction,
-          tools: [{ googleSearch: {} }],
-          temperature: 0.7,
-        },
-      });
-    } catch (searchError: any) {
-      console.warn("⚠️ Google Search Grounding quota reached. Switched to standard AI generation.");
-      fallbackUsed = true;
       try {
-        // Retry without googleSearch tool to avoid separate Search Grounding quota limits
         response = await ai.models.generateContent({
           model: "gemini-3.5-flash",
           contents: prompt,
           config: {
             systemInstruction: systemInstruction,
+            tools: [{ googleSearch: {} }],
             temperature: 0.7,
           },
         });
-      } catch (generalAIError: any) {
-        console.error("❌ Standard AI generation also failed (General Quota Limit):", generalAIError.message);
-        standardAIFallbackUsed = true;
+      } catch (searchError: any) {
+        console.warn("⚠️ Google Search Grounding quota reached. Switched to standard AI generation.");
+        fallbackUsed = true;
+        try {
+          response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: prompt,
+            config: {
+              systemInstruction: systemInstruction,
+              temperature: 0.7,
+            },
+          });
+        } catch (generalAIError: any) {
+          console.error("❌ Standard AI generation failed:", generalAIError.message);
+          standardAIFallbackUsed = true;
+        }
       }
     }
 
     if (standardAIFallbackUsed) {
-      // In case the entire API key is completely out of quota, we provide an elegant, helpful educational fallback template 
-      // rather than showing a raw error screen to the student.
-      const fallbackText = `
-### 📚 1. 핵심 개념 이해
+      const noticeHeader = missingApiKeyNotice 
+        ? "*(💡 Vercel 안내: GEMINI_API_KEY 추가 후 Vercel 프로젝트 [Deployments] 탭에서 [Redeploy (재배포)]를 실행하셔야 새 환경변수가 적용됩니다!)*\n\n"
+        : "";
+
+      const fallbackText = noticeHeader + `### 📚 1. 핵심 개념 이해
 🌟 **[핵심 요약]**: [${subject}] 과목의 '${unit}' 단원은 우리가 스스로 핵심 원리를 깨우치고 내 것으로 소화해야 할 정말 유익한 배움입니다.
 📊 **[도표/비교]**:
 - ✔️ **확실하게 이해한 개념** ──> 💡 자신 있게 직접 친구나 가족에게 설명해 줄 수 있는 완벽한 지식!
@@ -189,7 +198,7 @@ app.post("/api/education/explore", async (req, res) => {
 
 ### 💡 5. 단계별 상세 해설 및 스스로 깨닫는 힌트
 👍 스스로 설명해 보기는 뇌를 활성화하는 최고의 자기주도적 공부법입니다. 
-👍 잠시 후 서버가 안정되면, 다시 **'학습 상자 열기'**를 눌러 제미나이 선생님의 실시간 분석 교재를 새롭게 탐색해 보세요!
+👍 환경변수 연결 후 [Redeploy]를 진행하시면 실시간 제미나이 선생님의 깊이 있는 개별 탐색 교재가 자동으로 연동됩니다!
 `;
 
       return res.json({
@@ -203,10 +212,10 @@ app.post("/api/education/explore", async (req, res) => {
       });
     }
 
-    const text = response.text || "답변을 생성하지 못했습니다. 다시 시도해 주세요.";
+    const text = response?.text || "답변을 생성하지 못했습니다. 다시 시도해 주세요.";
     
     // Extract search grounding citations
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     let citations = chunks
       .filter((chunk: any) => chunk.web && chunk.web.uri)
       .map((chunk: any) => ({
@@ -215,7 +224,6 @@ app.post("/api/education/explore", async (req, res) => {
       }));
 
     if (fallbackUsed && citations.length === 0) {
-      // If we retried without Google Search but AI key was okay, provide standard educational links
       citations = [
         { title: "EBSi 고교 학습 사이트 (무료)", url: "https://www.ebsi.co.kr" },
         { title: "EBS 중학 교육 사이트 (무료)", url: "https://mid.ebs.co.kr" },
@@ -242,20 +250,22 @@ app.post("/api/education/explore", async (req, res) => {
 app.post("/api/education/check-summary", async (req, res) => {
   try {
     const ai = getAIClient();
-    if (!ai) {
-      return res.status(500).json({ 
-        success: false,
-        error: "Gemini API 키가 설정되지 않았습니다. Vercel 환경 변수(Environment Variables)에서 GEMINI_API_KEY를 설정해 주세요." 
-      });
-    }
-
     const { subject, unit, studentSummary, teacherExplanation } = req.body;
 
     if (!studentSummary) {
       return res.status(400).json({ error: "요약본을 입력해 주세요." });
     }
 
-    const prompt = `
+    let response;
+    let fallbackFeedback = false;
+    let missingApiKeyNotice = false;
+
+    if (!ai) {
+      console.warn("⚠️ GEMINI_API_KEY is missing in environment. Using summary fallback mode.");
+      fallbackFeedback = true;
+      missingApiKeyNotice = true;
+    } else {
+      const prompt = `
 과목: ${subject}
 단원/개념: ${unit}
 
@@ -268,7 +278,7 @@ ${teacherExplanation ? teacherExplanation.substring(0, 1500) : "해당 주제 �
 위 학생의 요약 내용을 분석하고, 보완할 점과 칭찬을 담아 정밀 평가해 주세요.
 `;
 
-    const systemInstruction = `
+      const systemInstruction = `
 당신은 학생의 자기주도적 학습(Active Recall)과 요약 능력을 길러주는 친절한 한국의 인공지능 보급 교사입니다.
 학생이 쓴 요약을 읽고, 정서적으로 크게 격려하면서도 핵심 개념을 올바르게 파악했는지 확인하세요.
 
@@ -281,42 +291,43 @@ ${teacherExplanation ? teacherExplanation.substring(0, 1500) : "해당 주제 �
 - 응답은 반드시 지정된 JSON 스키마를 따라야 하며 한국어로 성실히 대답해야 합니다.
 `;
 
-    let response;
-    let fallbackFeedback = false;
-
-    try {
-      response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT" as any, // In @google/genai, Type is an enum or string, let's use standard string/Type
-            properties: {
-              score: {
-                type: "INTEGER" as any,
-                description: "학생 요약 완성도 점수 (1점부터 5점까지)"
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            systemInstruction: systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT" as any,
+              properties: {
+                score: {
+                  type: "INTEGER" as any,
+                  description: "학생 요약 완성도 점수 (1점부터 5점까지)"
+                },
+                feedbackText: {
+                  type: "STRING" as any,
+                  description: "학생에게 전할 다정하고 격려 넘치는 평가 피드백 (한국어, 구어체)"
+                },
+                keyPointsMissed: {
+                  type: "ARRAY" as any,
+                  items: { type: "STRING" as any },
+                  description: "더 완벽한 요약을 위해 추가하면 좋은 핵심 키워드나 빠뜨린 점들 목록"
+                }
               },
-              feedbackText: {
-                type: "STRING" as any,
-                description: "학생에게 전할 다정하고 격려 넘치는 평가 피드백 (한국어, 구어체)"
-              },
-              keyPointsMissed: {
-                type: "ARRAY" as any,
-                items: { type: "STRING" as any },
-                description: "더 완벽한 요약을 위해 추가하면 좋은 핵심 키워드나 빠뜨린 점들 목록"
-              }
+              required: ["score", "feedbackText", "keyPointsMissed"]
             },
-            required: ["score", "feedbackText", "keyPointsMissed"]
-          },
-          temperature: 0.6,
-        }
-      });
-    } catch (apiError: any) {
-      console.warn("⚠️ Summary evaluation API failed, using educational client-side heuristic feedback...", apiError.message);
-      fallbackFeedback = true;
+            temperature: 0.6,
+          }
+        });
+      } catch (apiError: any) {
+        console.warn("⚠️ Summary evaluation API failed, using educational client-side heuristic feedback...", apiError.message);
+        fallbackFeedback = true;
+      }
     }
+
+
+
 
     let feedback;
     if (fallbackFeedback || !response) {
@@ -352,6 +363,10 @@ ${teacherExplanation ? teacherExplanation.substring(0, 1500) : "해당 주제 �
 요약을 정성스럽게 시작해 주셔서 정말 기뻐요! 조금 더 깊은 학습 효과(Active Recall)를 누리기 위해, 최소한 두세 줄 이상으로 핵심 공식의 명칭이나 배운 원리까지 살을 살짝 덧붙여서 구체적으로 구상해 볼까요?
 
 당신은 훨씬 더 훌륭하게 설명해 낼 수 있는 뛰어난 잠재력이 있답니다!`;
+      }
+
+      if (missingApiKeyNotice) {
+        feedbackText += "\n\n*(💡 Vercel 안내: GEMINI_API_KEY 추가 후 Vercel [Deployments] 탭에서 [Redeploy(재배포)] 버튼을 눌러야 실시간 AI 채점이 연동됩니다!)*";
       }
 
       feedback = {
